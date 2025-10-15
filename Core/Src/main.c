@@ -1,27 +1,27 @@
 /* USER CODE BEGIN Header */
 /**
-  ******************************************************************************
-  * @file           : main.c
-  * @brief          : Main program body
-  ******************************************************************************
-  * @attention
-  *
-  * Copyright (c) 2025 STMicroelectronics.
-  * All rights reserved.
-  *
-  * This software is licensed under terms that can be found in the LICENSE file
-  * in the root directory of this software component.
-  * If no LICENSE file comes with this software, it is provided AS-IS.
-  *
-  ******************************************************************************
-  */
+ ******************************************************************************
+ * @file           : main.c
+ * @brief          : Main program body
+ ******************************************************************************
+ * @attention
+ *
+ * Copyright (c) 2025 STMicroelectronics.
+ * All rights reserved.
+ *
+ * This software is licensed under terms that can be found in the LICENSE file
+ * in the root directory of this software component.
+ * If no LICENSE file comes with this software, it is provided AS-IS.
+ *
+ ******************************************************************************
+ */
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include <stdbool.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -51,6 +51,32 @@ FDCAN_HandleTypeDef hfdcan1;
 I2C_HandleTypeDef hi2c1;
 
 /* USER CODE BEGIN PV */
+// Race state
+// CAN
+FDCAN_TxHeaderTypeDef tx_header;
+can_message_eight tx_data;
+can_message_four tx_data_four;
+can_message_eight inverter_on_msg = { .sensor_int = 0x0101010101010101 };
+
+FDCAN_RxHeaderTypeDef rx_header;
+can_message_eight rx_data;
+
+can_message_eight button_data_test;
+
+// ADC
+__IO uint8_t adc_complete_flag = 0;
+uint16_t raw_adc_values[4];
+
+//Accelerometer Declaration
+struct Accelerometer accelerometer;
+//Brake Temperature Declaration
+float BrakeTemperature,PressureValue1,PressureValue2,LinearPotentiometerValue;
+//Steering Angle
+struct SteeringAngle steering_sensor;
+
+
+
+
 
 /* USER CODE END PV */
 
@@ -67,6 +93,183 @@ static void MX_ADC2_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef* hfdcan, uint32_t RxFifo0ITs) {
+    if ((RxFifo0ITs & FDCAN_IT_RX_FIFO0_NEW_MESSAGE) != RESET) {
+        HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_8);
+
+        // Retrieve Rx messages from RX FIFO0
+        if (HAL_FDCAN_GetRxMessage(hfdcan, FDCAN_RX_FIFO0, &rx_header, rx_data.bytes) != HAL_OK) {
+            // Reception Error
+            Error_Handler();
+        } else {
+            // No error, process received payload
+            switch (rx_header.Identifier) {
+                // Inverter
+                case 0x181:
+                    break;
+                case 0x281:
+                    break;
+                case 0x381:
+                    break;
+                case 0x481:
+                    break;
+                    // Display
+                case 0x301:
+                    // Read which button was pressed
+                    //button_data_test.sensor_int = rx_data.sensor_int;
+                    //handle_button_press(&race_state, rx_data.bytes[0]); todo: remove the comments
+                    break;
+            }
+        }
+
+        // Reactive receive notifications
+        if (HAL_FDCAN_ActivateNotification(hfdcan, FDCAN_IT_RX_FIFO0_NEW_MESSAGE, 0) != HAL_OK) {
+            Error_Handler();
+        }
+    }
+}
+
+// error detection
+
+//set output
+
+void send_CAN_message(uint32_t address, can_message_eight* msg) {
+    // Update ID of the transmit header
+    tx_header.Identifier = address;
+
+    if (HAL_FDCAN_AddMessageToTxFifoQ(&hfdcan1, &tx_header, msg->bytes) != HAL_OK) {
+        Error_Handler();
+    }
+}
+void send_CAN_message_four(uint32_t address, can_message_four* msg) {
+    // Update ID of the transmit header
+    tx_header.Identifier = address;
+    tx_header.DataLength = FDCAN_DLC_BYTES_4;
+
+    if (HAL_FDCAN_AddMessageToTxFifoQ(&hfdcan1, &tx_header, msg->bytes) != HAL_OK) {
+        Error_Handler();
+
+    }
+    tx_header.DataLength = FDCAN_DLC_BYTES_8;
+    ;
+}
+
+//ADC CallBack
+void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc){
+  adc_complete_flag=1;
+}
+
+
+
+
+
+// Accelerometer Functions
+void accelerometer_init(struct Accelerometer* accelerometer) {
+    accelerometer->device_config[0] = 0x18;
+    accelerometer->device_config[1] = 2;
+
+    accelerometer->lin_acc_config[0] = 0x10;
+    accelerometer->lin_acc_config[1] = 0xAA;
+
+    accelerometer->ang_vel_config[0] = 0x11;
+    accelerometer->ang_vel_config[1] = 0xB8;
+
+    accelerometer->lin_acc_out_address = 0x28;
+    accelerometer->ang_vel_out_address = 0x22;
+}
+
+void convert_acceleration(const uint8_t* data, float* ax, float* ay, float* az) {
+    int16_t raw_x = (int16_t) ((data[1] << 8) | data[0]);
+    int16_t raw_y = (int16_t) ((data[3] << 8) | data[2]);
+    int16_t raw_z = (int16_t) ((data[5] << 8) | data[4]);
+
+    *ax = (raw_x / 65535.0 * 8);
+    *ay = (raw_y / 65535.0 * 8);
+    *az = (raw_z / 65535.0 * 8);
+}
+
+void convert_angular_velocity(const uint8_t* data, float* ax, float* ay, float* az) {
+    int16_t raw_x = (int16_t) ((data[1] << 8) | data[0]);
+    int16_t raw_y = (int16_t) ((data[3] << 8) | data[2]);
+    int16_t raw_z = (int16_t) ((data[5] << 8) | data[4]);
+
+    *ax = (raw_x / 65535.0 * 1000 - 0.06);
+    *ay = (raw_y / 65535.0 * 1000 + 0.24);
+    *az = (raw_z / 65535.0 * 1000 + 0.03);
+}
+
+
+// Steering Angle Functions
+void steering_angle_init(struct SteeringAngle* sa) {
+    sa->adc_sum = 0;
+    sa->buffer_index = 0;
+
+    // Init buffer with zeroes
+    // maybe this can also be done at initialization? TODO
+    for (int i = 0; i < STEERING_BUFFER_SIZE; i++) {
+        sa->buffer[i] = 0;
+    }
+
+    sa->steering_value.float_val = 0.0f;  // init with 0 for safety
+}
+
+void steering_angle_avg(struct SteeringAngle* sa, float steering_value) {
+    sa->adc_sum -= sa->buffer[sa->buffer_index];
+
+    // Add new sample
+    sa->buffer[sa->buffer_index] = steering_value;
+    sa->adc_sum += steering_value;
+
+    // Increment index
+    sa->buffer_index++;
+    if (sa->buffer_index >= 32) {
+        sa->buffer_index = 0;
+    }
+
+    // Write average value
+    sa->steering_value.float_val = sa->adc_sum / 32.0f;
+}
+
+
+
+//Steering Angle Start
+float SteeringAngleADC(uint16_t rawValue){
+    float Steering=(float)(rawValue-3200)/4095*110;
+    return Steering;
+}
+
+//Steering Angle End
+
+
+
+//Brake Temperature Sensor - Start
+float BrakeTemperatureADC(uint16_t rawValue){
+  float Value;
+
+  Value = 565.0/4095.0*(float)rawValue;
+  return Value;
+}
+//Brake Temperature Sensor - End
+
+//Pressure Sensor - Start
+float PressureSensorADC(uint16_t rawValue){
+  float Value;
+
+  Value = 39.5/2916*(float)rawValue-1217.0/81.0;
+  return Value;
+}
+//Pressure Sensor -End
+
+//Linear Potentiometer - Start
+
+float LinPotentiometer(uint16_t rawValue){
+
+  float volt = 3.3f * ((float) rawValue) / 4096.0f;
+  float calc = ((float) volt - 0.42f) * 100.0f / 1.65f;
+
+  return calc;
+}
+//Linear Potentiometer - End
 
 /* USER CODE END 0 */
 
@@ -104,6 +307,28 @@ int main(void)
   MX_I2C1_Init();
   MX_ADC2_Init();
   /* USER CODE BEGIN 2 */
+    // Start ADC2
+    // Start FDCAN1
+    if (HAL_FDCAN_Start(&hfdcan1) != HAL_OK) {
+        Error_Handler();
+    }
+    if (HAL_FDCAN_ActivateNotification(&hfdcan1, FDCAN_IT_RX_FIFO0_NEW_MESSAGE, 0) != HAL_OK) {
+        /* Notification Error */
+        Error_Handler();
+    }
+
+    // Init race state
+    // Init sensor structs
+    //Accelerometer Init and I2C Init
+        accelerometer_init(&accelerometer);
+
+        HAL_I2C_Master_Transmit(&hi2c1, 0xd6, accelerometer.device_config, 2, 1000);
+
+        HAL_I2C_Master_Transmit(&hi2c1, 0xd6, accelerometer.lin_acc_config, 2, 1000);
+        HAL_I2C_Master_Transmit(&hi2c1, 0xd6, accelerometer.ang_vel_config, 2, 1000);
+
+        HAL_ADC_Start_DMA(&hadc2, (uint32_t *)raw_adc_values,4);
+
 
   /* USER CODE END 2 */
 
@@ -123,13 +348,80 @@ int main(void)
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-  while (1)
-  {
+    while (1) {
+
+        uint32_t sensor_value = 0;
+
+        tx_data_four.sensor_int = sensor_value;
+//        send_CAN_message_four(CHARGER_RXID, &tx_data_four);
+        // --- Send Accelerometer values ---
+        tx_data_four.sensor_float = accelerometer.lin_acc_x;
+        send_CAN_message_four(A2C2_ACC_X_ID, &tx_data_four);
+
+        tx_data_four.sensor_float = accelerometer.lin_acc_y;
+        send_CAN_message_four(A2C2_ACC_Y_ID, &tx_data_four);
+
+        tx_data_four.sensor_float = accelerometer.lin_acc_z;
+        send_CAN_message_four(A2C2_ACC_Z_ID, &tx_data_four);
+
+        tx_data_four.sensor_float = accelerometer.ang_vel_x;
+        send_CAN_message_four(A2C2_ANGV_X_ID, &tx_data_four);
+
+        tx_data_four.sensor_float = accelerometer.ang_vel_y;
+        send_CAN_message_four(A2C2_ANGV_Y_ID, &tx_data_four);
+
+        tx_data_four.sensor_float = accelerometer.ang_vel_z;
+        send_CAN_message_four(A2C2_ANGV_Z_ID, &tx_data_four);
+
+        // --- Send ADC-based sensors ---
+        tx_data_four.sensor_float = BrakeTemperature;
+        send_CAN_message_four(A2C2_BRAKE_TEMP_ID, &tx_data_four);
+
+        tx_data_four.sensor_float = PressureValue2;
+        send_CAN_message_four(A2C2_PRESSURE2_ID, &tx_data_four);
+
+        tx_data_four.sensor_float = PressureValue1;
+        send_CAN_message_four(A2C2_PRESSURE1_ID, &tx_data_four);
+
+        tx_data_four.sensor_float = LinearPotentiometerValue;
+        send_CAN_message_four(A2C2_POTENTIOMETER_ID, &tx_data_four);
+
+
+        if (adc_complete_flag) {
+
+          BrakeTemperature=BrakeTemperatureADC(raw_adc_values[0]);
+          PressureValue2=PressureSensorADC(raw_adc_values[1]);
+      PressureValue1=PressureSensorADC(raw_adc_values[2]);
+      LinearPotentiometerValue=LinPotentiometer(raw_adc_values[3]);
+
+          adc_complete_flag=0;
+          HAL_ADC_Start_DMA(&hadc2, (uint32_t *)raw_adc_values,4);
+
+            }
+
+
+
+        //Accelerometer I2C Start
+        HAL_I2C_Master_Transmit(&hi2c1, 0xd6, &(accelerometer.lin_acc_out_address), 1, 1000);
+        HAL_I2C_Master_Receive(&hi2c1, 0xd7, accelerometer.lin_acc_out_data, 6, 1000);
+        HAL_Delay(10);
+        HAL_I2C_Master_Transmit(&hi2c1, 0xd6, &(accelerometer.ang_vel_out_address), 1, 1000);
+        HAL_I2C_Master_Receive(&hi2c1, 0xd7, accelerometer.ang_vel_out_data, 6, 1000);
+
+        convert_acceleration(accelerometer.lin_acc_out_data, &(accelerometer.lin_acc_x), &(accelerometer.lin_acc_y), &(accelerometer.lin_acc_z));
+        convert_angular_velocity(accelerometer.ang_vel_out_data, &(accelerometer.ang_vel_x), &(accelerometer.ang_vel_y), &(accelerometer.ang_vel_z));
+        HAL_Delay(10);
+        //Accelerometer I2C End
+
+
+
+
+
 
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-  }
+    }
   /* USER CODE END 3 */
 }
 
@@ -303,7 +595,15 @@ static void MX_FDCAN1_Init(void)
     Error_Handler();
   }
   /* USER CODE BEGIN FDCAN1_Init 2 */
-
+    tx_header.Identifier = 0x301;  // no need to init address yet
+    tx_header.IdType = FDCAN_STANDARD_ID;
+    tx_header.TxFrameType = FDCAN_DATA_FRAME;
+    tx_header.DataLength = FDCAN_DLC_BYTES_8;
+    tx_header.ErrorStateIndicator = FDCAN_ESI_ACTIVE;
+    tx_header.BitRateSwitch = FDCAN_BRS_OFF;
+    tx_header.FDFormat = FDCAN_CLASSIC_CAN;
+    tx_header.TxEventFifoControl = FDCAN_NO_TX_EVENTS;
+    tx_header.MessageMarker = 0;
   /* USER CODE END FDCAN1_Init 2 */
 
 }
@@ -399,21 +699,21 @@ static void MX_GPIO_Init(void)
 
 /* USER CODE BEGIN Header */
 /**
-  ******************************************************************************
-  * @file           : main.c
-  * @brief          : Main program body
-  ******************************************************************************
-  * @attention
-  *
-  * Copyright (c) 2025 STMicroelectronics.
-  * All rights reserved.
-  *
-  * This software is licensed under terms that can be found in the LICENSE file
-  * in the root directory of this software component.
-  * If no LICENSE file comes with this software, it is provided AS-IS.
-  *
-  ******************************************************************************
-  */
+ ******************************************************************************
+ * @file           : main.c
+ * @brief          : Main program body
+ ******************************************************************************
+ * @attention
+ *
+ * Copyright (c) 2025 STMicroelectronics.
+ * All rights reserved.
+ *
+ * This software is licensed under terms that can be found in the LICENSE file
+ * in the root directory of this software component.
+ * If no LICENSE file comes with this software, it is provided AS-IS.
+ *
+ ******************************************************************************
+ */
 /* USER CODE END Header */
 
 /**
@@ -431,11 +731,10 @@ static void MX_GPIO_Init(void)
 void Error_Handler(void)
 {
   /* USER CODE BEGIN Error_Handler_Debug */
-  /* User can add his own implementation to report the HAL error return state */
-  __disable_irq();
-  while (1)
-  {
-  }
+    /* User can add his own implementation to report the HAL error return state */
+    __disable_irq();
+    while (1) {
+    }
   /* USER CODE END Error_Handler_Debug */
 }
 #ifdef USE_FULL_ASSERT
