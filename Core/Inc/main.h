@@ -54,42 +54,31 @@ extern "C" {
 #define PIN_ERROR   GPIO_PIN_6
 
 // --- Define IDs for A2C2 ---
-#define A2C2_ACC_X_ID          0x000C0B
-#define A2C2_ACC_Y_ID          0x000C0C
-#define A2C2_ACC_Z_ID          0x000C0D
-#define A2C2_ANGV_X_ID         0x000C0E
-#define A2C2_ANGV_Y_ID         0x000C0F
-#define A2C2_ANGV_Z_ID         0x000C10
-#define A2C2_BRAKE_TEMP_ID     0x000C11
-#define A2C2_PRESSURE2_ID      0x000C12
-#define A2C2_PRESSURE1_ID      0x000C13
-#define A2C2_POTENTIOMETER_ID  0x000C14
+#define A2C2_ACC_XY_ID                      0x711
+#define A2C2_ACC_Z_ANG_X_ID                 0x712
+#define A2C2_ANG_YZ_ID                      0x713
+#define A2C_BRAKE_TEMP_WATER_PUMP_ID        0x714
+#define A2C2_PRESSURE_POTENTIOMETER_ID      0x715
 
 /* USER CODE END Includes */
 
 /* Exported types ------------------------------------------------------------*/
 /* USER CODE BEGIN ET */
 typedef union {
-    float sensor_float;
-    uint32_t sensor_int;
+    float float_val;
+    uint32_t int_val;
     uint8_t bytes[4];
-} can_message_four;
+} bytes_four;
 
 typedef union {
     uint64_t sensor_int;  // we might not need this
     double sensor_double;  // we might not need this
     struct {
-        can_message_four first;
-        can_message_four second;
+        bytes_four first;
+        bytes_four second;
     };
     uint8_t bytes[8];
-} can_message_eight;
-
-typedef union {
-    float float_val;
-    uint32_t int_val;
-    uint8_t bytes[4];
-} bytes_four;
+} bytes_eight;
 
 // motorcycle State
 
@@ -102,8 +91,6 @@ typedef enum {
     FAULT_STATUS = 4,
     OFF = 5
 } ChargerCom;
-
-
 
 //Sensors Begin
 
@@ -141,7 +128,6 @@ void steering_angle_init(struct SteeringAngle* sa);
 void steering_angle_avg(struct SteeringAngle* sa, float value);
 //Steering Angle End
 
-
 //Sensors End
 
 /* USER CODE END ET */
@@ -161,10 +147,10 @@ void Error_Handler(void);
 
 /* USER CODE BEGIN EFP */
 
-void convert_float_display(can_message_four* msg_in, can_message_four* msg_out, int decimal_points);
+void convert_float_display(float float_in, bytes_four* msg_out, int decimal_points);  // Used for MoTeC
 
-void send_CAN_message(uint32_t address, can_message_eight* msg);
-void send_CAN_message_four(uint32_t address, can_message_four* msg);
+void send_CAN_message(uint32_t address, bytes_eight* msg);
+void send_CAN_message_four(uint32_t address, bytes_four* msg);
 
 void steering_angle_init(struct SteeringAngle* sa);
 void steering_angle_avg(struct SteeringAngle* sa, float value);

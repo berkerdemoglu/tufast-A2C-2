@@ -54,14 +54,11 @@ I2C_HandleTypeDef hi2c1;
 // Race state
 // CAN
 FDCAN_TxHeaderTypeDef tx_header;
-can_message_eight tx_data;
-can_message_four tx_data_four;
-can_message_eight inverter_on_msg = { .sensor_int = 0x0101010101010101 };
+bytes_eight tx_data;
+bytes_four tx_data_four;
 
 FDCAN_RxHeaderTypeDef rx_header;
-can_message_eight rx_data;
-
-can_message_eight button_data_test;
+bytes_eight rx_data;
 
 // ADC
 __IO uint8_t adc_complete_flag = 0;
@@ -70,14 +67,9 @@ uint16_t raw_adc_values[4];
 //Accelerometer Declaration
 struct Accelerometer accelerometer;
 //Brake Temperature Declaration
-float BrakeTemperature,PressureValue1,PressureValue2,LinearPotentiometerValue;
+float BrakeTemperature, BrakePressureValue, WaterPumpPressure, LinearPotentiometerValue;
 //Steering Angle
 struct SteeringAngle steering_sensor;
-
-
-
-
-
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -104,20 +96,8 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef* hfdcan, uint32_t RxFifo0ITs)
         } else {
             // No error, process received payload
             switch (rx_header.Identifier) {
-                // Inverter
-                case 0x181:
-                    break;
-                case 0x281:
-                    break;
-                case 0x381:
-                    break;
-                case 0x481:
-                    break;
-                    // Display
-                case 0x301:
-                    // Read which button was pressed
-                    //button_data_test.sensor_int = rx_data.sensor_int;
-                    //handle_button_press(&race_state, rx_data.bytes[0]); todo: remove the comments
+                // TODO: Remove since it's unused
+                default:
                     break;
             }
         }
@@ -133,7 +113,7 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef* hfdcan, uint32_t RxFifo0ITs)
 
 //set output
 
-void send_CAN_message(uint32_t address, can_message_eight* msg) {
+void send_CAN_message(uint32_t address, bytes_eight* msg) {
     // Update ID of the transmit header
     tx_header.Identifier = address;
 
@@ -141,7 +121,7 @@ void send_CAN_message(uint32_t address, can_message_eight* msg) {
         Error_Handler();
     }
 }
-void send_CAN_message_four(uint32_t address, can_message_four* msg) {
+void send_CAN_message_four(uint32_t address, bytes_four* msg) {
     // Update ID of the transmit header
     tx_header.Identifier = address;
     tx_header.DataLength = FDCAN_DLC_BYTES_4;
@@ -151,17 +131,16 @@ void send_CAN_message_four(uint32_t address, can_message_four* msg) {
 
     }
     tx_header.DataLength = FDCAN_DLC_BYTES_8;
-    ;
+}
+
+void convert_float_display(float msg_in, bytes_four* msg_out, int decimal_points) {
+    msg_out->int_val = (int32_t) (msg_in * decimal_points);
 }
 
 //ADC CallBack
-void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc){
-  adc_complete_flag=1;
+void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc) {
+    adc_complete_flag = 1;
 }
-
-
-
-
 
 // Accelerometer Functions
 void accelerometer_init(struct Accelerometer* accelerometer) {
@@ -198,7 +177,6 @@ void convert_angular_velocity(const uint8_t* data, float* ax, float* ay, float* 
     *az = (raw_z / 65535.0 * 1000 + 0.03);
 }
 
-
 // Steering Angle Functions
 void steering_angle_init(struct SteeringAngle* sa) {
     sa->adc_sum = 0;
@@ -230,44 +208,40 @@ void steering_angle_avg(struct SteeringAngle* sa, float steering_value) {
     sa->steering_value.float_val = sa->adc_sum / 32.0f;
 }
 
-
-
 //Steering Angle Start
-float SteeringAngleADC(uint16_t rawValue){
-    float Steering=(float)(rawValue-3200)/4095*110;
+float SteeringAngleADC(uint16_t rawValue) {
+    float Steering = (float) (rawValue - 3200) / 4095 * 110;
     return Steering;
 }
 
 //Steering Angle End
 
-
-
 //Brake Temperature Sensor - Start
-float BrakeTemperatureADC(uint16_t rawValue){
-  float Value;
+float BrakeTemperatureADC(uint16_t rawValue) {
+    float Value;
 
-  Value = 565.0/4095.0*(float)rawValue;
-  return Value;
+    Value = 565.0 / 4095.0 * (float) rawValue;
+    return Value;
 }
 //Brake Temperature Sensor - End
 
 //Pressure Sensor - Start
-float PressureSensorADC(uint16_t rawValue){
-  float Value;
+float PressureSensorADC(uint16_t rawValue) {
+    float Value;
 
-  Value = 39.5/2916*(float)rawValue-1217.0/81.0;
-  return Value;
+    Value = 39.5 / 2916 * (float) rawValue - 1217.0 / 81.0;
+    return Value;
 }
 //Pressure Sensor -End
 
 //Linear Potentiometer - Start
 
-float LinPotentiometer(uint16_t rawValue){
+float LinPotentiometer(uint16_t rawValue) {
 
-  float volt = 3.3f * ((float) rawValue) / 4096.0f;
-  float calc = ((float) volt - 0.42f) * 100.0f / 1.65f;
+    float volt = 3.3f * ((float) rawValue) / 4096.0f;
+    float calc = ((float) volt - 0.42f) * 100.0f / 1.65f;
 
-  return calc;
+    return calc;
 }
 //Linear Potentiometer - End
 
@@ -319,16 +293,15 @@ int main(void)
 
     // Init race state
     // Init sensor structs
-    //Accelerometer Init and I2C Init
-        accelerometer_init(&accelerometer);
+    // Accelerometer Init and I2C Init
+    accelerometer_init(&accelerometer);
 
-        HAL_I2C_Master_Transmit(&hi2c1, 0xd6, accelerometer.device_config, 2, 1000);
+    HAL_I2C_Master_Transmit(&hi2c1, 0xd6, accelerometer.device_config, 2, 1000);
 
-        HAL_I2C_Master_Transmit(&hi2c1, 0xd6, accelerometer.lin_acc_config, 2, 1000);
-        HAL_I2C_Master_Transmit(&hi2c1, 0xd6, accelerometer.ang_vel_config, 2, 1000);
+    HAL_I2C_Master_Transmit(&hi2c1, 0xd6, accelerometer.lin_acc_config, 2, 1000);
+    HAL_I2C_Master_Transmit(&hi2c1, 0xd6, accelerometer.ang_vel_config, 2, 1000);
 
-        HAL_ADC_Start_DMA(&hadc2, (uint32_t *)raw_adc_values,4);
-
+    HAL_ADC_Start_DMA(&hadc2, (uint32_t*) raw_adc_values, 4);
 
   /* USER CODE END 2 */
 
@@ -348,75 +321,62 @@ int main(void)
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
+    int can_message_counter = 0;
     while (1) {
-
-        uint32_t sensor_value = 0;
-
-        tx_data_four.sensor_int = sensor_value;
-//        send_CAN_message_four(CHARGER_RXID, &tx_data_four);
-        // --- Send Accelerometer values ---
-        tx_data_four.sensor_float = accelerometer.lin_acc_x;
-        send_CAN_message_four(A2C2_ACC_X_ID, &tx_data_four);
-
-        tx_data_four.sensor_float = accelerometer.lin_acc_y;
-        send_CAN_message_four(A2C2_ACC_Y_ID, &tx_data_four);
-
-        tx_data_four.sensor_float = accelerometer.lin_acc_z;
-        send_CAN_message_four(A2C2_ACC_Z_ID, &tx_data_four);
-
-        tx_data_four.sensor_float = accelerometer.ang_vel_x;
-        send_CAN_message_four(A2C2_ANGV_X_ID, &tx_data_four);
-
-        tx_data_four.sensor_float = accelerometer.ang_vel_y;
-        send_CAN_message_four(A2C2_ANGV_Y_ID, &tx_data_four);
-
-        tx_data_four.sensor_float = accelerometer.ang_vel_z;
-        send_CAN_message_four(A2C2_ANGV_Z_ID, &tx_data_four);
-
-        // --- Send ADC-based sensors ---
-        tx_data_four.sensor_float = BrakeTemperature;
-        send_CAN_message_four(A2C2_BRAKE_TEMP_ID, &tx_data_four);
-
-        tx_data_four.sensor_float = PressureValue2;
-        send_CAN_message_four(A2C2_PRESSURE2_ID, &tx_data_four);
-
-        tx_data_four.sensor_float = PressureValue1;
-        send_CAN_message_four(A2C2_PRESSURE1_ID, &tx_data_four);
-
-        tx_data_four.sensor_float = LinearPotentiometerValue;
-        send_CAN_message_four(A2C2_POTENTIOMETER_ID, &tx_data_four);
-
+//        switch (can_message_counter++) {
+//            case 0:
+//                convert_float_display(accelerometer.lin_acc_x, &tx_data.first, DECIMAL_POINT_2);
+//                convert_float_display(accelerometer.lin_acc_y, &tx_data.second, DECIMAL_POINT_2);
+//                send_CAN_message(A2C2_ACC_XY_ID, &tx_data);
+//                break;
+//            case 1:
+//                convert_float_display(accelerometer.lin_acc_z, &tx_data.first, DECIMAL_POINT_2);
+//                convert_float_display(accelerometer.ang_vel_x, &tx_data.second, DECIMAL_POINT_2);
+//                send_CAN_message(A2C2_ACC_Z_ANG_X_ID, &tx_data);
+//                break;
+//            case 2:
+//                convert_float_display(accelerometer.ang_vel_y, &tx_data.first, DECIMAL_POINT_2);
+//                convert_float_display(accelerometer.ang_vel_z, &tx_data.second, DECIMAL_POINT_2);
+//                send_CAN_message(A2C2_ANG_YZ_ID, &tx_data);
+//                break;
+//            case 3:
+//                convert_float_display(BrakeTemperature, &tx_data.first, DECIMAL_POINT_2);
+//                convert_float_display(WaterPumpPressure, &tx_data.second, DECIMAL_POINT_2);
+//                send_CAN_message(A2C_BRAKE_TEMP_WATER_PUMP_ID, &tx_data);
+//                break;
+//            case 4:
+//                convert_float_display(BrakePressureValue, &tx_data.first, DECIMAL_POINT_2);
+//                convert_float_display(LinearPotentiometerValue, &tx_data.second, DECIMAL_POINT_2);
+//                send_CAN_message(A2C2_PRESSURE_POTENTIOMETER_ID, &tx_data);
+//                break;
+//        }
+//
+        // Reset counter if necessary
+        if (can_message_counter >= 5) {
+            can_message_counter = 0;
+        }
 
         if (adc_complete_flag) {
+            BrakeTemperature = BrakeTemperatureADC(raw_adc_values[0]);
+            WaterPumpPressure = PressureSensorADC(raw_adc_values[1]);
+            BrakePressureValue = PressureSensorADC(raw_adc_values[2]);
+            LinearPotentiometerValue = LinPotentiometer(raw_adc_values[3]);
 
-          BrakeTemperature=BrakeTemperatureADC(raw_adc_values[0]);
-          PressureValue2=PressureSensorADC(raw_adc_values[1]);
-      PressureValue1=PressureSensorADC(raw_adc_values[2]);
-      LinearPotentiometerValue=LinPotentiometer(raw_adc_values[3]);
+            adc_complete_flag = 0;
+            HAL_ADC_Start_DMA(&hadc2, (uint32_t*) raw_adc_values, 4);
+        }
 
-          adc_complete_flag=0;
-          HAL_ADC_Start_DMA(&hadc2, (uint32_t *)raw_adc_values,4);
-
-            }
-
-
-
-        //Accelerometer I2C Start
+        // Accelerometer I2C Start
         HAL_I2C_Master_Transmit(&hi2c1, 0xd6, &(accelerometer.lin_acc_out_address), 1, 1000);
         HAL_I2C_Master_Receive(&hi2c1, 0xd7, accelerometer.lin_acc_out_data, 6, 1000);
         HAL_Delay(10);
         HAL_I2C_Master_Transmit(&hi2c1, 0xd6, &(accelerometer.ang_vel_out_address), 1, 1000);
         HAL_I2C_Master_Receive(&hi2c1, 0xd7, accelerometer.ang_vel_out_data, 6, 1000);
 
-        convert_acceleration(accelerometer.lin_acc_out_data, &(accelerometer.lin_acc_x), &(accelerometer.lin_acc_y), &(accelerometer.lin_acc_z));
-        convert_angular_velocity(accelerometer.ang_vel_out_data, &(accelerometer.ang_vel_x), &(accelerometer.ang_vel_y), &(accelerometer.ang_vel_z));
-        HAL_Delay(10);
-        //Accelerometer I2C End
-
-
-
-
-
+        convert_acceleration(accelerometer.lin_acc_out_data, &(accelerometer.lin_acc_x), &(accelerometer.lin_acc_y),
+                &(accelerometer.lin_acc_z));
+        convert_angular_velocity(accelerometer.ang_vel_out_data, &(accelerometer.ang_vel_x), &(accelerometer.ang_vel_y),
+                &(accelerometer.ang_vel_z));
 
     /* USER CODE END WHILE */
 
@@ -579,7 +539,7 @@ static void MX_FDCAN1_Init(void)
   hfdcan1.Init.AutoRetransmission = DISABLE;
   hfdcan1.Init.TransmitPause = DISABLE;
   hfdcan1.Init.ProtocolException = DISABLE;
-  hfdcan1.Init.NominalPrescaler = 16;
+  hfdcan1.Init.NominalPrescaler = 8;
   hfdcan1.Init.NominalSyncJumpWidth = 1;
   hfdcan1.Init.NominalTimeSeg1 = 13;
   hfdcan1.Init.NominalTimeSeg2 = 2;
